@@ -1,0 +1,13 @@
+__pycache__
+.ipynb_checkpoints
+
+.DS_Store
+
+sure_chembl_data/
+compound_data/*
+!compound_data/metformin.txt
+!compound_data/metformin.sdf
+
+secret.py
+
+temp.ipynb

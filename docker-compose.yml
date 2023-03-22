@@ -1,0 +1,18 @@
+version: '0.1'
+services:
+  my-postgres:
+    container_name: my-postgres
+    image: my-postgres
+    command: postgres -c synchronous_commit=off -c full_page_writes=off -c shared_buffers=2048MB -c work_mem=128MB
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db:/docker-entrypoint-initdb.d
+volumes:
+  pgdata:
