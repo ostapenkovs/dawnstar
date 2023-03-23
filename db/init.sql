@@ -24,9 +24,6 @@ create table compound (
     primary key(id)
 );
 
-create index smi_idx on compound using gist(smiles);
-create index mfp_idx on compound using gist(mfp);
-
 create table patent (
     id serial,
     num varchar(32) unique not null,
