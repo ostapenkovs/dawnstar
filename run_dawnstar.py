@@ -21,11 +21,14 @@ import bs4
 from rdkit import Chem
 import random
 
+import psycopg2
+from secret import db_info
+
 DATA_FOLDER = './compound_data'
 HEADERS = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
            AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'}
 
-def get_compounds(infile: str) -> list:
+def get_compounds(infile: str, canonical: bool) -> list:
     """Process user input-file and return compound SMILES after sanitizing."""
     compounds = []
     if infile.split('.')[-1] == 'sdf':
@@ -35,7 +38,10 @@ def get_compounds(infile: str) -> list:
             all_mols = [Chem.MolFromSmiles(line.strip()) for line in f]
     for mol in all_mols:
         if mol:
-            smi = Chem.MolToSmiles(mol, isomericSmiles=True, kekuleSmiles=True)
+            if canonical:
+                smi = Chem.MolToSmiles(mol, canonical=True)
+            else:
+                smi = Chem.MolToSmiles(mol, isomericSmiles=True, kekuleSmiles=True)
             if smi:
                 compounds.append(smi)
     return compounds
@@ -193,7 +199,7 @@ def main() -> None:
     ### END USER ARGS ###
 
     ### BEGIN GET COMPOUNDS ###
-    compounds = get_compounds(infile=args.infile)
+    compounds = get_compounds(infile=args.infile, canonical=False)
     if not compounds:
         print('No compounds found.')
         return
