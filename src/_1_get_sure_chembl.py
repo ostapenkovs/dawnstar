@@ -8,7 +8,7 @@ def main() -> None:
     
     start = time.time()
 
-    data_folder = './sure_chembl_data'
+    data_folder = '../sure_chembl_data'
     if not os.path.exists(data_folder):
         os.makedirs(data_folder)
     
