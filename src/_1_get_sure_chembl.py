@@ -4,7 +4,7 @@ from tqdm import tqdm
 import ftplib
 
 def main() -> None:
-    '''Download all SureChembl data files from Chembl FTP'''
+    '''Download all SureChembl data files from Chembl FTP.'''
     
     start = time.time()
 
