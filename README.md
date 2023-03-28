@@ -11,13 +11,13 @@ DOCKER (using files inside ./Docker directory):
         * destroy containers and volumes: add "-v" flag
 
 PYTHON (using files inside ./src directory):
-4. conda create -n "dawnenv" python=3.11
-5. conda activate dawnenv
-6. "pip install -r requirements.txt"
-7. "python _1_get_sure_chembl.py"
-8. "python _2_split_backfile.py"
-9. "python _3_populate_db.py"
-10. DAWNSTAR: "python _4_run_dawnstar.py"
+1. conda create -n "dawnenv" python=3.11
+2. conda activate dawnenv
+3. "pip install -r requirements.txt"
+4. "python _1_get_sure_chembl.py"
+5. "python _2_split_backfile.py"
+6. "python _3_populate_db.py"
+7. DAWNSTAR: "python _4_run_dawnstar.py"
 
 DAWNSTAR:
 * example usage: "python _4_run_dawnstar.py -if ../compound_data/metformin.txt -of result -st exact"
