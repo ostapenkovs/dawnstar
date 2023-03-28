@@ -1,6 +1,6 @@
 Workflow to programatically retrieve patent information by SMILES/SDF, allowing for exact and inexact matches. 
 
-Instructions presume user has Anaconda/Miniconda package manager installed on their machine.
+Instructions presume user has Anaconda/Miniconda package manager installed on their machine. Requires Python == 3.11.
 
 DOCKER (using files inside ./Docker directory):
 1. install Docker Desktop and WSL
@@ -27,5 +27,3 @@ MISC:
 * default Postgres database connection parameters: inside ./Docker/.env and ./src/config.py
 * Docker database files location on local machine: "\\wsl.localhost\docker-desktop-data\data\docker\volumes\{volume_name}\_data"
     * replace {volume_name} with name of your volume
-
-Requires Python == 3.11
