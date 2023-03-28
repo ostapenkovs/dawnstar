@@ -5,28 +5,37 @@
 #
 #   Requiring Python == 3.11.
 
-import requests
-from io import StringIO
-import aiohttp
-import asyncio
+from collections.abc import Generator
+import argparse
 import os
-import sys
+from tqdm import tqdm
 import time
 from datetime import datetime
-import argparse
-import json
-import pandas as pd
-from collections import defaultdict
-import bs4
-from rdkit import Chem
-import random
 
 import psycopg2
-from secret import db_info
+import aiohttp
+import asyncio
+import json
+import bs4
 
-DATA_FOLDER = './compound_data'
+from rdkit import Chem, DataStructs
+from rdkit.Chem import AllChem
+from rdkit import RDLogger
+RDLogger.DisableLog('rdApp.*')
+
+from config import db_info
+
+DATA_FOLDER = './data'
+BASE = 'https://patents.google.com/patent/'
+CHUNK_SIZE = 50
+SLEEP_TIME = 3
 HEADERS = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
            AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'}
+
+def chunks(l: list, n: int) -> Generator:
+    '''Break list l into chunks of size n to iterate over.'''
+    for i in range(0, len(l), n):
+        yield l[i: i+n]
 
 def get_compounds(infile: str, canonical: bool) -> list:
     """Process user input-file and return compound SMILES after sanitizing."""
@@ -48,12 +57,12 @@ def get_compounds(infile: str, canonical: bool) -> list:
 
 def validate_date(date: str) -> bool:
     """Validate potential before and after date cutoffs.
-    Want date to be before NOW and after Jan. 1st, 1970."""
+    Want date to be before NOW and after Jan. 1st, 1962."""
     try:
         if len(date) == 8:
             yr, mo, dy = int(date[0:4]), int(date[4:6]), int(date[6:8])
             date = datetime(year=yr, month=mo, day=dy)
-            if date >= datetime(year=1970, month=1, day=1) and date < datetime.now():
+            if date >= datetime(year=1962, month=1, day=1) and date < datetime.now():
                 return True
     except Exception as e:
         print(e)
@@ -122,42 +131,72 @@ def parse_timeline(page_text: str) -> tuple:
                 date = e_date
     return title, date, status, status_detail
 
-async def get_url_async(session: aiohttp.ClientSession, url: str, headers: dict) -> str:
+async def get_url_async(session: aiohttp.ClientSession, url: str, headers: dict, base=None) -> str:
     """Makes async request to get single patent webpage text.
     Raises error if response is not 200."""
+    if base is not None: url = base + url
     async with session.get(url=url, headers=headers) as response:
         response.raise_for_status()
         return await response.text()
 
-async def get_timeline_async(session: aiohttp.ClientSession, url: str, headers: dict) -> tuple | None:
+async def get_timeline_async(session: aiohttp.ClientSession, url: str, headers: dict, base=None, pbar=None) -> tuple | None:
     """Async wrapper for parse_timeline function."""
-    page_text = await get_url_async(session=session, url=url, headers=headers)
+    page_text = await get_url_async(session=session, url=url, headers=headers, base=base)
     title, date, status, status_detail = parse_timeline(page_text=page_text)
-    if title and date and (status or status_detail):
-        return (title, (date, status, status_detail))
-    return None
+    if pbar is not None: pbar.update(1)
+    return (title, (date, status, status_detail))
 
-async def get_all_async(urls: list, headers: dict) -> list:
+async def get_all_async(urls: list, headers: dict, base=None, pbar=None) -> list:
     """Collect information for all patents in async fashion."""
-    l = []
     async with aiohttp.ClientSession() as session:
-        for i, url in enumerate(urls):
-            l.append(get_timeline_async(session=session, url=url, headers=headers))
-            if i % 5 == 0 and i > 0:
-                print(f'Processed URL {i}.')
-        return await asyncio.gather(*l)
+        return await asyncio.gather(*[get_timeline_async(session=session, url=url, headers=headers, base=base, pbar=pbar) for url in urls])
+
+def patents_for_compound(curs, compound: str, search_type: str, threshold=None, after=None, before=None) -> list | None:
+    '''Find all patents for a given compound from SureChembl database with optional filters.'''
+    data = None
+    ###
+    if search_type == 'exact':
+        search = 'c.smiles @= %s '
+    elif search_type == 'substructure':
+        search = 'c.smiles @> %s '
+    elif search_type == 'similarity':
+        m = Chem.MolFromSmiles(compound)
+        if not m:
+            return
+        compound = DataStructs.BitVectToBinaryText(AllChem.GetMorganFingerprintAsBitVect(m, 2, nBits=1024))
+        m = None
+        search = 'c.mfp%%bfp_from_binary_text(%s) '
+        if not threshold:
+            threshold = 0.75
+        curs.execute('set rdkit.tanimoto_threshold = %s', (threshold, ))
+    else:
+        return
+    ###
+    sql = 'select p.num from compound c, patent p, field_freq f \
+        where c.id = f.compound_id and p.id = f.patent_id and f.field_id = 2 and ' + search
+    if after:
+        sql += f"and p.pub_date >= {after}::text::timestamp "
+    if before:
+        sql += f"and p.pub_date < {before}::text::timestamp "
+    ###
+    curs.execute(sql, (compound, ))
+    try:
+        data = [x[0] for x in curs.fetchall()]
+    except Exception as e:
+        print(e)
+    return data
 
 def main() -> None:
     """Process command line arguments and execute patent expiration workflow."""
     ### BEGIN USER ARGS ###
     parser = argparse.ArgumentParser(description='Dawnstar patent expiration workflow command line utility.')
 
-    parser.add_argument('-if', '--infile', type=str, help='FilePATH (!) containing compounds in SDF or SMILES/INCHIKEY format.')
-    parser.add_argument('-is', '--issmiles', type=str, help='If SMI format, is it SMILES (versus INCHIKEY) [y/n]?', required=False)
+    parser.add_argument('-if', '--infile', type=str, help='FilePATH (!) containing compounds in SDF or SMILES format.')
+    parser.add_argument('-of', '--outfile', type=str, help='Desired fileNAME (!) of resulting output.')
     parser.add_argument('-st', '--searchtype', type=str, help='What type of search to perform (exact, similarity, substructure).', required=False)
+    parser.add_argument('-th', '--threshold', type=float, help='If similarity search, specify the threshold (between 0 and 1).', required=False)
     parser.add_argument('-a', '--after', type=str, help='After (lower-bound) date in yyyymmdd format', required=False)
     parser.add_argument('-b', '--before', type=str, help='Before (upper-bound) date in yyyymmdd format', required=False)
-    parser.add_argument('-of', '--outfile', type=str, help='Desired fileNAME (!) of resulting output.')
     
     args = parser.parse_args()
 
@@ -165,20 +204,20 @@ def main() -> None:
         print('Unacceptable infile.')
         return
     
-    is_smiles = True
-    if args.issmiles is not None:
-        if args.issmiles == 'n':
-            is_smiles = False
-        elif args.issmiles != 'y':
-            print('Unacceptable issmiles.')
-            return
-    
     search_type = 'exact'
     if args.searchtype is not None:
         if args.searchtype in ['exact', 'similarity', 'substructure']:
             search_type = args.searchtype
         else:
             print('Unacceptable searchtype.')
+            return
+    
+    threshold = 0.75
+    if args.threshold is not None:
+        if args.threshold > 0 and args.threshold < 1:
+            threshold = args.threshold
+        else:
+            print('Unacceptable threshold.')
             return
     
     after = None
@@ -199,7 +238,7 @@ def main() -> None:
     ### END USER ARGS ###
 
     ### BEGIN GET COMPOUNDS ###
-    compounds = get_compounds(infile=args.infile, canonical=False)
+    compounds = get_compounds(infile=args.infile, canonical=True)
     if not compounds:
         print('No compounds found.')
         return
@@ -208,69 +247,49 @@ def main() -> None:
     ### END GET COMPOUNDS
     
     ### BEGIN DAWNSTAR WORKFLOW ###
-    reg_session = requests.Session()
+    schema_name = 'sc'
 
-    data = defaultdict(dict)
-    for i, comp in enumerate(compounds):
-        print(f'Working on compound: {comp}...')
-        search_url, download_url = build_query(compound=comp, is_smiles=is_smiles, search_type=search_type,
-                                               base_filters=True, after=after, before=before)
-        
-        print(f'Searching URL: {search_url}')
+    conn = psycopg2.connect(**db_info)
 
-        ### BEGIN GOOGLE XHR ###
-        r = reg_session.get('http://google.com')
-        r.raise_for_status()
-        cookies = reg_session.cookies.get_dict()
+    curs = conn.cursor()
+    curs.execute(f'set search_path to {schema_name}')
 
-        j, max_iter = 0, 10
-        start_sec, inc_sec = 5, 10
-        while True:
-            try:
-                r = reg_session.get(download_url, headers=HEADERS, cookies=cookies)
-                r.raise_for_status()
-                break
-            except requests.exceptions.HTTPError:
-                if j > max_iter:
-                    raise ValueError('Too much sleeping.')
-                elif j > 0:
-                    start_sec += inc_sec
-                print(f'Google XHR error. Sleeping for {start_sec} seconds...')
-                time.sleep(start_sec)
-                j += 1
-        ### END GOOGLE XHR ###
+    ###
+    data = {}
+    for compound in tqdm(compounds, desc='Compounds'):
+        patents = patents_for_compound(curs=curs, compound=compound, search_type=search_type,
+                                       threshold=threshold, after=after, before=before)
+        if not patents: continue
+        
+        inner_pbar = tqdm(total=len(patents), leave=False, desc='Patents')
+        results = []
+        for pat in chunks(l=patents, n=CHUNK_SIZE):
+            res = asyncio.run(get_all_async(urls=pat, headers=HEADERS, base=BASE, pbar=inner_pbar))
+            results += res
+            res = None
+            for _ in tqdm(range(SLEEP_TIME), leave=False, desc='Sleeping'): time.sleep(1)
+        inner_pbar.close()
+        
+        if not results: continue
 
-        patent_urls = None
-        patent_data = pd.read_csv(StringIO(r.text), skiprows=1)
-        if len(patent_data) >= 1:
-            patent_urls = patent_data['result link'].dropna(axis=0, how='any').unique().tolist()
-        # patent_urls = ['https://patents.google.com/patent/US6421675B1/']
-        
-        results = None
-        if patent_urls:
-            print(f'Found {len(patent_urls)} patents for this compound.')
-            results = asyncio.run(get_all_async(urls=patent_urls, headers=HEADERS))
-            results = [res for res in results if res is not None]
-        
-        if results:
-            data[comp].update(results)
-        
-        reg_session.cookies.clear()
-        
-        if len(compounds) > 1:
-            print('Sleeping for a random number of seconds before moving on...')
-            time.sleep( random.randint(5, 10) )
+        data[compound] = {k: v for k, v in results}
+        patents = results = None
+    ###
 
-    reg_session.close()
+    curs.close()
+    conn.close()
     ### END DAWNSTAR WORKFLOW ###
 
     ### BEGIN DATA DUMP ###
-    if data:
-        print('Dumping found data to JSON.')
-        if not os.path.exists(DATA_FOLDER):
-            os.makedirs(DATA_FOLDER)
-        with open(f'{DATA_FOLDER}/{args.outfile}.txt', 'w') as f:
-            json.dump(data, f, ensure_ascii=False)
+    if not data:
+        print('Nothing found for given compounds.')
+        return
+
+    print('Dumping found data to JSON.')
+    if not os.path.exists(DATA_FOLDER):
+        os.makedirs(DATA_FOLDER)
+    with open(f'{DATA_FOLDER}/{args.outfile}.txt', 'w') as f:
+        json.dump(data, f, ensure_ascii=False)
     ### END DATA DUMP ###
 
 if __name__ == '__main__':

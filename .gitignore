@@ -8,6 +8,9 @@ compound_data/*
 !compound_data/metformin.txt
 !compound_data/metformin.sdf
 
+data/*
+!data/result.txt
+
 secret.py
 
 temp.ipynb
