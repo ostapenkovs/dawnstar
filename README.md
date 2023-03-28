@@ -25,5 +25,5 @@ DAWNSTAR:
 
 MISC:
 * default Postgres database connection parameters: inside ./Docker/.env and ./src/config.py
-* Docker database files location on local machine: "\\wsl.localhost\docker-desktop-data\data\docker\volumes\{volume_name}\_data"
+* Docker database files location on local machine: "\\\wsl.localhost\docker-desktop-data\data\docker\volumes\\{volume_name}\\_data"
     * replace {volume_name} with name of your volume
