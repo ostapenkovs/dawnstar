@@ -8,7 +8,7 @@ import io
 import time
 
 from rdkit import Chem, DataStructs
-from rdkit.Chem import AllChem
+from rdkit.Chem import AllChem, SaltRemover
 from rdkit import RDLogger
 RDLogger.DisableLog('rdApp.*')
 
@@ -39,6 +39,8 @@ def main() -> None:
 
     field_freq = 'field_freq'
     fld_cols = ['id', 'patent_id', 'field_type', 'field_freq']
+
+    remover = SaltRemover.SaltRemover()
 
     ### POPULATING THE DATABASE ###
     for f_idx, f in enumerate(files):
@@ -76,6 +78,7 @@ def main() -> None:
             if not m: 
                 invalid_compounds.append(id)
                 continue
+            m = remover.StripMol(m)
             can_smi = Chem.MolToSmiles(m, canonical=True)
             if not can_smi: 
                 invalid_compounds.append(id)
