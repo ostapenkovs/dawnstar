@@ -3,7 +3,7 @@
 ### Instructions presume user has Anaconda/Miniconda package manager installed on their machine. Requires Python == 3.11.
 
 *DOCKER (using files inside ./Docker directory)*
-1. install Docker Desktop and WSL 1
+1. install Docker Desktop and WSL
 2. build Docker image: "docker build -t my-postgres ."
 3. start Docker container and initialize database: "docker compose up"
     * run Docker container in the background: add "-d" flag
